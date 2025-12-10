@@ -1,0 +1,527 @@
+# Steg-för-steg Guide: Automatisera med GitHub Actions
+
+Jag ska visa dig exakt vad du ska göra, steg för steg!
+
+---
+
+## Steg 1: Klona ditt repo lokalt
+
+Öppna terminalen och kör:
+
+```bash
+# Klona repot
+git clone https://github.com/HardoMX/ditt-repo-namn.git
+
+# Gå in i mappen
+cd ditt-repo-namn
+```
+
+---
+
+## Steg 2: Skapa mappstrukturen för GitHub Actions
+
+```bash
+# Skapa mappen för workflows
+mkdir -p .github/workflows
+```
+
+Din mappstruktur ska nu se ut så här:
+
+```
+ditt-repo/
+├── .github/
+│   └── workflows/       ← NY MAPP
+├── backend/
+├── deployment/
+├── frontend/
+└── README.md
+```
+
+---
+
+## Steg 3: Skapa workflow-filen
+
+Skapa filen `.github/workflows/deploy.yml`:
+
+```bash
+# Skapa filen (välj ETT av dessa sätt)
+
+# Sätt 1: Med nano
+nano .github/workflows/deploy.yml
+
+# Sätt 2: Med VS Code
+code .github/workflows/deploy.yml
+
+# Sätt 3: Med touch och sedan öppna i valfri editor
+touch .github/workflows/deploy.yml
+```
+
+Kopiera och klistra in detta innehåll i filen:
+
+```yaml
+name: Build and Deploy to OpenShift
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+env:
+  BACKEND_IMAGE: ghcr.io/${{ github.repository }}/backend
+  FRONTEND_IMAGE: ghcr.io/${{ github.repository }}/frontend
+
+jobs:
+  # ===========================================
+  # JOB 1: Bygg Backend
+  # ===========================================
+  build-backend:
+    name: Build Backend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Backend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          push: true
+          tags: |
+            ${{ env.BACKEND_IMAGE }}:${{ github.sha }}
+            ${{ env.BACKEND_IMAGE }}:latest
+
+  # ===========================================
+  # JOB 2: Bygg Frontend
+  # ===========================================
+  build-frontend:
+    name: Build Frontend
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push Frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}
+            ${{ env.FRONTEND_IMAGE }}:latest
+
+  # ===========================================
+  # JOB 3: Deploy till OpenShift
+  # ===========================================
+  deploy:
+    name: Deploy to OpenShift
+    runs-on: ubuntu-latest
+    needs: [build-backend, build-frontend]
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install OpenShift CLI
+        uses: redhat-actions/openshift-tools-installer@v1
+        with:
+          oc: 4
+
+      - name: Login to OpenShift
+        run: |
+          oc login --token=${{ secrets.OPENSHIFT_TOKEN }} \
+                   --server=${{ secrets.OPENSHIFT_SERVER }} \
+                   --insecure-skip-tls-verify=true
+
+      - name: Select project
+        run: |
+          oc project ${{ secrets.OPENSHIFT_NAMESPACE }}
+
+      - name: Create Secrets
+        run: |
+          # Ta bort gamla secrets om de finns
+          oc delete secret db-secrets --ignore-not-found=true
+          oc delete secret redis-secrets --ignore-not-found=true
+          
+          # Skapa nya secrets
+          oc create secret generic db-secrets \
+            --from-literal=POSTGRESQL_USER=guestbook \
+            --from-literal=POSTGRESQL_PASSWORD=${{ secrets.DB_PASSWORD }} \
+            --from-literal=POSTGRESQL_DATABASE=guestbook
+          
+          oc create secret generic redis-secrets \
+            --from-literal=REDIS_PASSWORD=${{ secrets.REDIS_PASSWORD }}
+
+      - name: Deploy PostgreSQL
+        run: |
+          oc apply -f deployment/postgres-deployment.yaml
+          oc apply -f deployment/postgres-service.yaml
+
+      - name: Deploy Redis
+        run: |
+          oc apply -f deployment/redis-deployment.yaml
+          oc apply -f deployment/redis-service.yaml
+
+      - name: Deploy Backend
+        run: |
+          # Uppdatera image i deployment
+          sed -i "s|image:.*|image: ${{ env.BACKEND_IMAGE }}:${{ github.sha }}|g" \
+            deployment/backend-deployment.yaml
+          
+          oc apply -f deployment/backend-deployment.yaml
+          oc apply -f deployment/backend-service.yaml
+
+      - name: Deploy Frontend
+        run: |
+          # Uppdatera image i deployment
+          sed -i "s|image:.*|image: ${{ env.FRONTEND_IMAGE }}:${{ github.sha }}|g" \
+            deployment/frontend-deployment.yaml
+          
+          oc apply -f deployment/frontend-deployment.yaml
+          oc apply -f deployment/frontend-service.yaml
+          oc apply -f deployment/route.yaml
+
+      - name: Wait for deployments
+        run: |
+          echo "Väntar på PostgreSQL..."
+          oc rollout status deployment/postgres --timeout=120s
+          
+          echo "Väntar på Redis..."
+          oc rollout status deployment/redis --timeout=120s
+          
+          echo "Väntar på Backend..."
+          oc rollout status deployment/backend --timeout=120s
+          
+          echo "Väntar på Frontend..."
+          oc rollout status deployment/frontend --timeout=120s
+
+      - name: Show deployment status
+        run: |
+          echo "=== PODS ==="
+          oc get pods
+          
+          echo ""
+          echo "=== SERVICES ==="
+          oc get services
+          
+          echo ""
+          echo "=== ROUTE ==="
+          oc get route
+          
+          ROUTE_URL=$(oc get route frontend -o jsonpath='{.spec.host}')
+          echo ""
+          echo "Application URL: https://$ROUTE_URL"
+```
+
+Spara filen:
+- I nano: `Ctrl+O`, sedan `Enter`, sedan `Ctrl+X`
+- I VS Code: `Ctrl+S`
+
+---
+
+## Steg 4: Lägg till Secrets i GitHub
+
+### 4.1 Öppna GitHub i webbläsaren
+
+Gå till: `https://github.com/HardoMX/ditt-repo-namn`
+
+### 4.2 Navigera till Secrets
+
+```
+1. Klicka på "Settings" (kugghjulet) i menyn
+          ↓
+2. I vänstermenyn, klicka på "Secrets and variables"
+          ↓
+3. Klicka på "Actions"
+          ↓
+4. Klicka på "New repository secret"
+```
+
+### 4.3 Lägg till dessa secrets (en i taget)
+
+Klicka **"New repository secret"** för varje:
+
+| Name | Value (exempel) |
+|------|-----------------|
+| `OPENSHIFT_SERVER` | `https://api.din-cluster.example.com:6443` |
+| `OPENSHIFT_TOKEN` | Din token (se steg 5 nedan) |
+| `OPENSHIFT_NAMESPACE` | `ditt-projektnamn` |
+| `DB_PASSWORD` | `mittHemligaLösenord123` |
+| `REDIS_PASSWORD` | `redisLösenord456` |
+
+---
+
+## Steg 5: Hämta OpenShift Token
+
+### 5.1 Logga in på OpenShift i terminalen
+
+```bash
+oc login --server=https://api.din-cluster.example.com:6443
+```
+
+Du kommer bli ombedd att ange användarnamn och lösenord.
+
+### 5.2 Skapa en service account för GitHub Actions
+
+```bash
+# Skapa service account
+oc create serviceaccount github-actions
+
+# Ge rättigheter
+oc policy add-role-to-user edit -z github-actions
+
+# Hämta token (gäller i 1 år)
+oc create token github-actions --duration=8760h
+```
+
+**Kopiera token som skrivs ut** - detta är vad du lägger in som `OPENSHIFT_TOKEN` i GitHub Secrets.
+
+---
+
+## Steg 6: Kontrollera dina deployment-filer
+
+Kontrollera att du har dessa filer i `deployment/`-mappen:
+
+```bash
+ls -la deployment/
+```
+
+Du bör ha ungefär:
+
+```
+deployment/
+├── backend-deployment.yaml
+├── backend-service.yaml
+├── frontend-deployment.yaml
+├── frontend-service.yaml
+├── postgres-deployment.yaml
+├── postgres-service.yaml
+├── redis-deployment.yaml
+├── redis-service.yaml
+├── configmap.yaml
+├── route.yaml
+└── (eventuellt fler filer)
+```
+
+### 6.1 Om filerna är uppdelade annorlunda
+
+Titta på vad du har:
+
+```bash
+cat deployment/backend-deployment.yaml
+```
+
+Om servicen är i samma fil som deployment, behöver du justera workflow-filen.
+
+---
+
+## Steg 7: Kontrollera Dockerfiles
+
+### 7.1 Backend Dockerfile
+
+```bash
+cat backend/Dockerfile
+```
+
+Om filen inte finns, skapa den:
+
+```bash
+nano backend/Dockerfile
+```
+
+Klistra in:
+
+```dockerfile
+# Stage 1: Build
+FROM registry.access.redhat.com/ubi10/go-toolset:10.0 AS builder
+
+WORKDIR /app
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+RUN go build -o guestbook-api .
+
+# Stage 2: Runtime
+FROM registry.access.redhat.com/ubi10-minimal:10.0
+
+WORKDIR /app
+COPY --from=builder /app/guestbook-api .
+USER 1001
+EXPOSE 8080
+CMD ["./guestbook-api"]
+```
+
+### 7.2 Frontend Dockerfile
+
+```bash
+cat frontend/Dockerfile
+```
+
+Om filen inte finns, skapa den:
+
+```bash
+nano frontend/Dockerfile
+```
+
+Klistra in:
+
+```dockerfile
+FROM registry.access.redhat.com/ubi10/nginx-126:10.0
+
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY *.html /usr/share/nginx/html/
+
+EXPOSE 8080
+CMD ["nginx", "-g", "daemon off;"]
+```
+
+---
+
+## Steg 8: Commit och Push
+
+```bash
+# Se vilka filer som ändrats
+git status
+
+# Lägg till alla ändringar
+git add .
+
+# Commit med ett meddelande
+git commit -m "Add GitHub Actions workflow for CI/CD"
+
+# Push till GitHub
+git push origin main
+```
+
+---
+
+## Steg 9: Se workflow köra
+
+### 9.1 Gå till GitHub Actions
+
+```
+1. Gå till ditt repo på GitHub
+          ↓
+2. Klicka på "Actions" fliken
+          ↓
+3. Du ser din workflow köra!
+```
+
+### 9.2 Klicka på workflow-körningen
+
+Du ser något som:
+
+```
+Build and Deploy to OpenShift
+    │
+    ├── ✅ Build Backend (grön = klar)
+    ├── ✅ Build Frontend (grön = klar)
+    └── 🔄 Deploy to OpenShift (gul = pågår)
+```
+
+### 9.3 Klicka på ett jobb för att se loggar
+
+Om något är rött (❌), klicka på det för att se vad som gick fel.
+
+---
+
+## Steg 10: Verifiera i OpenShift
+
+När workflow är klar (allt grönt ✅):
+
+```bash
+# Logga in på OpenShift
+oc login --server=https://api.din-cluster.example.com:6443
+
+# Välj ditt projekt
+oc project ditt-projektnamn
+
+# Se alla pods
+oc get pods
+
+# Se route (din app-URL)
+oc get route
+```
+
+---
+
+## 🔧 Om något går fel
+
+### Problem: "Error: Resource not found"
+
+**Lösning:** Kolla att dina YAML-filer har rätt sökväg
+
+```bash
+# Lista alla filer i deployment/
+ls -la deployment/
+
+# Kontrollera en fil
+cat deployment/backend-deployment.yaml
+```
+
+### Problem: "Authentication failed"
+
+**Lösning:** Skapa ny token
+
+```bash
+oc create token github-actions --duration=8760h
+```
+
+Uppdatera `OPENSHIFT_TOKEN` i GitHub Secrets.
+
+### Problem: "Image pull error"
+
+**Lösning:** Gör images publika eller lägg till image pull secret
+
+```bash
+# Skapa pull secret i OpenShift
+oc create secret docker-registry ghcr-secret \
+  --docker-server=ghcr.io \
+  --docker-username=ditt-github-användarnamn \
+  --docker-password=din-github-token
+
+# Länka till default service account
+oc secrets link default ghcr-secret --for=pull
+```
+
+---
+
+## ✅ Checklista
+
+Bocka av när du är klar:
+
+- [ ] Skapat `.github/workflows/deploy.yml`
+- [ ] Lagt till `OPENSHIFT_SERVER` i GitHub Secrets
+- [ ] Lagt till `OPENSHIFT_TOKEN` i GitHub Secrets
+- [ ] Lagt till `OPENSHIFT_NAMESPACE` i GitHub Secrets
+- [ ] Lagt till `DB_PASSWORD` i GitHub Secrets
+- [ ] Lagt till `REDIS_PASSWORD` i GitHub Secrets
+- [ ] Kontrollerat att Dockerfiles finns
+- [ ] Pushat till GitHub
+- [ ] Sett workflow köra i Actions-fliken
+- [ ] Verifierat att pods körs i OpenShift
+
+---
+
+Har du fastnat på något specifikt steg? Berätta vilket steg så hjälper jag dig vidare! 🚀
