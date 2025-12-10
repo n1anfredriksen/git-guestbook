@@ -20,21 +20,33 @@ jobs:
         password: ${{ secrets.GHCR_TOKEN }}
 
     - name: Build app container
+      run:  - name: Build guestbook container
       run: |
-        OWNER=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
-        docker build -t ghcr.io/$OWNER/guestbook:latest app
+        docker build -t ghcr.io/${{ github.repository_owner }}/guestbook:latest ./guestbook
+        
 
     - name: Build redis container
+      - name: Build redis container
       run: |
-        docker build -t ghcr.io/${{ github.repository_owner }}/redis:latest redis
+        docker build -t ghcr.io/${{ github.repository_owner }}/redis:latest ./redis
+        
 
     - name: Push containers
       run: |
         docker push ghcr.io/${{ github.repository_owner }}/guestbook:latest
         docker push ghcr.io/${{ github.repository_owner }}/redis:latest
 
+        
+    - name: Install OpenShift CLI
+      run: |
+        curl -LO https://mirror.openshift.com/pub/openshift-v4/clients/oc/latest/linux/oc.tar.gz
+        tar -xvf oc.tar.gz
+        sudo mv oc /usr/local/bin/
+
+        
     - name: Login to OpenShift
       run: oc login ${{ secrets.OC_SERVER }} --token=${{ secrets.OC_TOKEN }} --insecure-skip-tls-verify
+      
 
     - name: Deploy on OpenShift
       run: |
