@@ -20,13 +20,12 @@ jobs:
         password: ${{ secrets.GHCR_TOKEN }}
 
     - name: Build app container
-      run:  - name: Build guestbook container
       run: |
         docker build -t ghcr.io/${{ github.repository_owner }}/guestbook:latest ./guestbook
         
 
+   
     - name: Build redis container
-      - name: Build redis container
       run: |
         docker build -t ghcr.io/${{ github.repository_owner }}/redis:latest ./redis
         
