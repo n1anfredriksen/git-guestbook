@@ -21,7 +21,8 @@ jobs:
 
     - name: Build app container
       run: |
-        docker build -t ghcr.io/billare/guestbook:latest
+        OWNER=$(echo "${GITHUB_REPOSITORY_OWNER}" | tr '[:upper:]' '[:lower:]')
+        docker build -t ghcr.io/$OWNER/guestbook:latest app
 
     - name: Build redis container
       run: |
