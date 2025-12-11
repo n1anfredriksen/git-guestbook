@@ -27,6 +27,7 @@ Den färdiga applikationen ser ut så här: [screencast.com](https://app.screenc
 w
 ## Container images
 
+
 - registry.access.redhat.com/ubi10/go-toolset:10.0
 - registry.access.redhat.com/ubi10-minimal:10.0
 - registry.access.redhat.com/ubi10/nginx-126:10.0
