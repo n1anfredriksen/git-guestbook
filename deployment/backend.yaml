@@ -1,4 +1,4 @@
-i# PostgreSQL
+# PostgreSQL
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
