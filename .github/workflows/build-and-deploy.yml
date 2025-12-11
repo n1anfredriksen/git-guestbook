@@ -44,7 +44,8 @@ jobs:
 
         
     - name: Login to OpenShift
-      run: oc login --server=${{ secrets.OC_SERVER }} --token=${{ secrets.OC_TOKEN }} --insecure-skip-tls-verify
+      run: oc login ${{ secrets.OC_SERVER }} --token=${{ secrets.OC_TOKEN }} --insecure-skip-tls-verify
+
 
       
     - name: Deploy on OpenShift
