@@ -27,7 +27,7 @@ jobs:
    
     - name: Build redis container
       run: |
-        docker build -f redis/Containerfile -t ghcr.io/billare/redis:latest ./frontend
+        docker build -f frontend/Containerfile -t ghcr.io/billare/redis:latest ./frontend
         
 
     - name: Push containers
