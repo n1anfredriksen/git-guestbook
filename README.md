@@ -10,7 +10,7 @@ I denna labb ska ni bygga och deploya en modern, cloud-native applikation på Op
 - Persistent storage
 - External routing 
 
-## Arkitektur 
+## Arkitektur  
 
 
 ```txt
