@@ -8,7 +8,7 @@ I denna labb ska ni bygga och deploya en modern, cloud-native applikation på Op
 - Service discovery
 - Caching strategies
 - Persistent storage
-- External routing
+- External routing 
 
 ## Arkitektur 
 
