@@ -1,9 +1,9 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: martin-db-config
+  name: db-config
 data:
   db-name: guestbook
-  db-host: martin-postgres
-  redis-host: martin-redis
+  db-host: postgres
+  redis-host: redis
   redis-port: "6379"
